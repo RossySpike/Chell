@@ -13,10 +13,6 @@ enum OPERATOR_TYPE {
   REDIRECTION_INPUT,
   REDIRECTION_OUTPUT,
   REDIRECTION_APPEND,
-  REDIRECTION_ERROR_OUTPUT,
-  REDIRECTION_ALL_OUTPUT,
-  REDIRECTION_STDERR_TO_STDOUT,
-  REDIRECTION_STDOUT_TO_STDERR,
   PIPE
 };
 
@@ -36,14 +32,6 @@ enum OPERATOR_TYPE getOperatorType(const char *op) {
     return REDIRECTION_OUTPUT;
   } else if (strcmp(op, ">>") == 0) {
     return REDIRECTION_APPEND;
-  } else if (strcmp(op, "2>") == 0) {
-    return REDIRECTION_ERROR_OUTPUT;
-  } else if (strcmp(op, "&>") == 0) {
-    return REDIRECTION_ALL_OUTPUT;
-  } else if (strcmp(op, "&1") == 0) {
-    return REDIRECTION_STDERR_TO_STDOUT;
-  } else if (strcmp(op, "&2") == 0) {
-    return REDIRECTION_STDOUT_TO_STDERR;
   } else if (strcmp(op, "|") == 0) {
     return PIPE;
   }
@@ -189,10 +177,6 @@ Tree *createTree(char **tokens) {
       case REDIRECTION_INPUT:
       case REDIRECTION_OUTPUT:
       case REDIRECTION_APPEND:
-      case REDIRECTION_ERROR_OUTPUT:
-      case REDIRECTION_ALL_OUTPUT:
-      case REDIRECTION_STDERR_TO_STDOUT:
-      case REDIRECTION_STDOUT_TO_STDERR:
         newNode->type = FILE_PATH;
         newNode->filePath = tokens[i];
         break;
@@ -258,79 +242,6 @@ void freeTree(Tree *tree) {
 #include <stdio.h>
 #include <string.h>
 
-void printNode(Tree *tree) {
-  switch (tree->node->type) {
-  case PROCESS:
-    printf("PROCESS: ");
-    for (int i = 0; i < tree->node->command.argc; i++) {
-      printf("%s ", tree->node->command.argv[i]);
-    }
-    printf("\n");
-    break;
-  case EXEC_CONTROL:
-    printf("EXEC_CONTROL: %s (opType=%d)\n", tree->node->execControl.operator,
-           tree->node->execControl.opType);
-    break;
-  case FILE_PATH:
-    printf("FILE_PATH: %s\n", tree->node->filePath);
-    break;
-  case ENV_VAR:
-    printf("ENV_VAR: %s=%s\n", tree->node->envVar.key,
-           tree->node->envVar.value);
-    break;
-  default:
-    printf("UNKNOWN NODE\n");
-  }
-}
-void printTree(Tree *tree, const char *relation, int depth) {
-  if (!tree) {
-
-    printf("No tree to display %d.\n", depth);
-    return;
-  }
-  if (!tree->node) {
-    printf("Empty node at depth %d.\n", depth);
-    return;
-  }
-
-  // Indentación para visualizar niveles
-  for (int i = 0; i < depth; i++) {
-    printf("  ");
-  }
-
-  // Mostrar relación (Root, Left, Right)
-  printf("%s -> ", relation);
-
-  // Mostrar contenido del nodo
-  switch (tree->node->type) {
-  case PROCESS:
-    printf("PROCESS: ");
-    for (int i = 0; i < tree->node->command.argc; i++) {
-      printf("%s ", tree->node->command.argv[i]);
-    }
-    printf("\n");
-    break;
-  case EXEC_CONTROL:
-    printf("EXEC_CONTROL: %s (opType=%d)\n", tree->node->execControl.operator,
-           tree->node->execControl.opType);
-    break;
-  case FILE_PATH:
-    printf("FILE_PATH: %s\n", tree->node->filePath);
-    break;
-  case ENV_VAR:
-    printf("ENV_VAR: %s=%s\n", tree->node->envVar.key,
-           tree->node->envVar.value);
-    break;
-  default:
-    printf("UNKNOWN NODE\n");
-  }
-
-  // Recorrer hijos
-  if (tree->leftSon)
-    printTree(tree->leftSon, "Left", depth + 1);
-  if (tree->rightSon)
-    printTree(tree->rightSon, "Right", depth + 1);
-}
 #ifdef TEST_TREE
 
 // Función para liberar memoria

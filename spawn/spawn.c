@@ -20,14 +20,6 @@ int getFd(const char *filePath, enum OPERATOR_TYPE op) {
   case REDIRECTION_APPEND:
     return open(filePath, O_WRONLY | O_CREAT | O_APPEND, 0644);
     break;
-  case REDIRECTION_ERROR_OUTPUT:
-    return open(filePath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    break;
-  case REDIRECTION_ALL_OUTPUT:
-    return open(filePath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    break;
-  case REDIRECTION_STDERR_TO_STDOUT:
-  case REDIRECTION_STDOUT_TO_STDERR:
   default:
     break;
   }
@@ -38,9 +30,9 @@ int spawn(char **args, int outputfd, int inputfd, int shouldWait, int opType) {
   /* printf("outputfd: %d\n", outputfd); */
   /* printf("Spawning process: %s\n", args[0]); */
   /* printf("With args:\n"); */
-  for (int i = 0; args && args[i] != NULL; i++) {
-    printf("  - %s\n", args[i]);
-  }
+  /* for (int i = 0; args && args[i] != NULL; i++) { */
+  /*   printf("  - %s\n", args[i]); */
+  /* } */
   if (strcmp(args[0], "exit") == 0) {
     return EXIT;
   } else if (strcmp(args[0], "cd") == 0) {
@@ -70,47 +62,21 @@ int spawn(char **args, int outputfd, int inputfd, int shouldWait, int opType) {
     }
     switch (opType) {
     case REDIRECTION_OUTPUT:
+    case REDIRECTION_APPEND:
       if (outputfd != STDOUT_FILENO) {
 
         dup2(outputfd, STDOUT_FILENO);
         if (outputfd > 2)
           close(outputfd);
       }
-      break;
-    case REDIRECTION_ERROR_OUTPUT:
-      if (outputfd != STDERR_FILENO) {
-
-        dup2(outputfd, STDERR_FILENO);
-
-        if (outputfd > 2)
-          close(outputfd);
-      }
-      break;
-    case REDIRECTION_ALL_OUTPUT:
-      if (outputfd != STDERR_FILENO) {
-
-        dup2(outputfd, STDERR_FILENO);
-      }
-      if (outputfd != STDOUT_FILENO) {
-
-        dup2(outputfd, STDOUT_FILENO);
-      }
-      if (outputfd > 2)
-        close(outputfd);
-      break;
-    case REDIRECTION_STDERR_TO_STDOUT:
-
-      dup2(STDOUT_FILENO, STDERR_FILENO);
-      break;
-    case REDIRECTION_STDOUT_TO_STDERR:
-
-      dup2(STDERR_FILENO, STDOUT_FILENO);
       break;
     case PIPE:
-      if (inputfd != STDIN_FILENO)
-        dup2(inputfd, STDIN_FILENO);
-      if (outputfd != STDOUT_FILENO)
+    case REDIRECTION_INPUT:
+      if (outputfd != STDOUT_FILENO) {
         dup2(outputfd, STDOUT_FILENO);
+        if (outputfd > 2)
+          close(outputfd);
+      }
     }
     execvp(args[0], args);
     exit(1);            // execvp failed
@@ -136,67 +102,6 @@ int spawn(char **args, int outputfd, int inputfd, int shouldWait, int opType) {
   }
 }
 
-typedef struct PipeResult {
-  int inputfd; // lectura del último pipe
-} PipeResult;
-
-PipeResult preparePipeline(Stack **stack) {
-  PipeResult result = {STDIN_FILENO};
-  int fds[2];
-  int inputfd = STDIN_FILENO;
-
-  while (*stack && (*stack)->currentTree && (*stack)->currentTree->node &&
-         (*stack)->currentTree->node->type == EXEC_CONTROL &&
-         (*stack)->currentTree->node->execControl.opType == PIPE) {
-
-    Tree *pipeTree = (*stack)->currentTree;
-    Node *leftNode = pipeTree->leftSon ? pipeTree->leftSon->node : NULL;
-    Node *rightNode = pipeTree->rightSon ? pipeTree->rightSon->node : NULL;
-
-    // crear pipe
-    pipe(fds);
-    int outputfd = fds[1];
-
-    // lanzar hijo izquierdo
-    if (leftNode && leftNode->type == PROCESS) {
-      spawn(leftNode->command.argv, outputfd, inputfd, 0, PIPE);
-    }
-
-    // cerrar extremos en el padre
-    if (outputfd > 2)
-      close(outputfd);
-    if (inputfd > 2)
-      close(inputfd);
-
-    // preparar input para el siguiente
-    inputfd = fds[0];
-
-    // avanzar en el stack
-    unStack(stack);
-
-    if (*stack && (*stack)->currentTree && (*stack)->currentTree->node &&
-        (*stack)->prev && (*stack)->prev->currentTree &&
-        (*stack)->prev->currentTree->node &&
-        (*stack)->prev->currentTree->node->type == EXEC_CONTROL &&
-        (*stack)->prev->currentTree->node->execControl.opType == PIPE) {
-
-      // llegamos al último pipe: no ejecutar el proceso derecho
-      result.inputfd = inputfd;
-      break;
-      // si el rightNode es otro PIPE, seguimos
-    } else if (rightNode && rightNode->type == EXEC_CONTROL &&
-               rightNode->execControl.opType == PIPE) {
-      addToStack(stack, pipeTree->rightSon);
-    } else {
-
-      // llegamos al último pipe: no ejecutar el proceso derecho
-      result.inputfd = inputfd;
-      break;
-    }
-  }
-
-  return result;
-}
 int processTree(Tree *tree) {
   if (!tree)
     return 0;
@@ -214,42 +119,27 @@ int processTree(Tree *tree) {
   int outputfdRight = STDOUT_FILENO;
   int inputfdRight = STDIN_FILENO;
   int fds[2];
-  while (stack && stack->currentTree) {
+  int piped = 0;
+  int pipedLeft = 0;
+  int pipedInputRight;
+  int rightCanStart = 1;
+  int leftCanStart = 1;
+  while (stack->currentTree) {
 
-    PipeResult res;
-    int pipeline = 0;
     currentTree = stack->currentTree;
     Node *currentNode = currentTree ? currentTree->node : NULL;
-    if (currentNode && currentNode->type && currentNode->type == EXEC_CONTROL &&
-        currentNode->execControl.opType == PIPE) {
-
-      res = preparePipeline(&stack);
-      inputfdLeft = res.inputfd;
-      inputfdRight = res.inputfd;
-
-      currentTree = stack->currentTree;
-
-      currentNode = currentTree ? currentTree->node : NULL;
-      pipeline = 1;
-    }
-    Node *leftNode =
-        currentTree ? currentTree->leftSon ? currentTree->leftSon->node : NULL
-                    : NULL;
+    Node *leftNode = currentTree->leftSon ? currentTree->leftSon->node : NULL;
 
     /* printNode(currentTree); */
     Node *rightNode =
-        currentTree ? currentTree->rightSon ? currentTree->rightSon->node : NULL
-                    : NULL;
+        currentTree->rightSon ? currentTree->rightSon->node : NULL;
 
     int leftProcessStatus = 0;
-    int rightCanStart = 1;
-    int leftCanStart = 1;
     currentTree = stack->prev ? stack->prev->currentTree : NULL;
     unStack(&stack);
+    int op = -1;
 
-    if (leftNode && leftNode->type == PROCESS && leftCanStart) {
-
-      uint op = -1;
+    if (leftNode->type == PROCESS && leftCanStart) {
 
       if (currentNode) {
         op = currentNode->execControl.opType;
@@ -277,6 +167,15 @@ int processTree(Tree *tree) {
           op = currentTree->node->execControl.opType;
           unStack(&stack);
         }
+        if (currentTree && currentTree->node &&
+            currentTree->node->type == EXEC_CONTROL &&
+            currentTree->node->execControl.opType == PIPE) {
+          pipe(fds);
+          outputfdLeft = fds[1];
+          pipedInputRight = fds[0];
+          piped = 1;
+          pipedLeft = 1;
+        }
         break;
       case REDIRECTION_OUTPUT:
         outputfdLeft = open(rightNode ? rightNode->filePath : NULL,
@@ -286,47 +185,14 @@ int processTree(Tree *tree) {
         outputfdLeft = open(rightNode ? rightNode->filePath : NULL,
                             O_WRONLY | O_CREAT | O_APPEND, 0644);
         break;
-      case REDIRECTION_ERROR_OUTPUT:
-        outputfdLeft = open(rightNode ? rightNode->filePath : NULL,
-                            O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        break;
-      case REDIRECTION_ALL_OUTPUT:
-        outputfdLeft = open(rightNode ? rightNode->filePath : NULL,
-                            O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        break;
       case PIPE:
-        if (!stack || !stack->currentTree || !stack->currentTree->node ||
-            stack->currentTree->node->type != EXEC_CONTROL) {
-
-          break;
-        }
-        switch (stack->currentTree->node->execControl.opType) {
-
-        case REDIRECTION_OUTPUT:
-          outputfdLeft = open(rightNode ? rightNode->filePath : NULL,
-                              O_WRONLY | O_CREAT | O_TRUNC, 0644);
-          break;
-        case REDIRECTION_APPEND:
-          outputfdLeft = open(rightNode ? rightNode->filePath : NULL,
-                              O_WRONLY | O_CREAT | O_APPEND, 0644);
-          break;
-        case REDIRECTION_ERROR_OUTPUT:
-          outputfdLeft = open(rightNode ? rightNode->filePath : NULL,
-                              O_WRONLY | O_CREAT | O_TRUNC, 0644);
-          break;
-        case REDIRECTION_ALL_OUTPUT:
-          outputfdLeft = open(rightNode ? rightNode->filePath : NULL,
-                              O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        default:
-          break;
-        }
+        pipe(fds);
+        outputfdLeft = fds[1];
+        inputfdRight = fds[0];
         break;
-      case REDIRECTION_STDERR_TO_STDOUT:
-      case REDIRECTION_STDOUT_TO_STDERR:
       default:
         break;
       }
-
       retValue = leftProcessStatus = spawn(leftNode->command.argv, outputfdLeft,
                                            inputfdLeft, shouldWait, op);
 
@@ -350,13 +216,19 @@ int processTree(Tree *tree) {
     if (rightNode && rightCanStart) {
       Node *upperNode =
           stack ? stack->currentTree ? stack->currentTree->node : NULL : NULL;
-      uint opRight = upperNode ? upperNode->execControl.opType : -1;
+      int opRight = upperNode ? upperNode->execControl.opType : -1;
       int shouldWaitRight = opRight == BACKGROUND ? 0 : 1;
       Node *upperRight =
           currentTree
               ? currentTree->rightSon ? currentTree->rightSon->node : NULL
               : NULL;
+      if (piped) {
+        piped = 0;
+        inputfdRight = pipedInputRight;
+      }
 
+      if (op == PIPE) {
+      }
       switch (opRight) {
 
         /* case REDIRECTION_INPUT: */
@@ -365,21 +237,30 @@ int processTree(Tree *tree) {
         inputfdRight = open(upperRight ? upperRight->filePath : NULL, O_RDONLY);
         if (stack && stack->prev && stack->prev->currentTree &&
             stack->prev->currentTree->node &&
-            stack->prev->currentTree->node->type == EXEC_CONTROL &&
-            REDIRECTION_INPUT <
-                stack->prev->currentTree->node->execControl.opType &&
-            stack->prev->currentTree->node->execControl.opType < PIPE) {
-          Tree *tree = stack->prev->currentTree;
-          outputfdRight = getFd(
-              tree->rightSon ? tree->rightSon->node
-                                   ? tree->rightSon->node->type == FILE_PATH
-                                         ? tree->rightSon->node->filePath
-                                         : NULL
-                                   : NULL
-                             : NULL,
-              stack->prev->currentTree->node->execControl.opType);
-          opRight = stack->prev->currentTree->node->execControl.opType;
-          unStack(&stack);
+            stack->prev->currentTree->node->type == EXEC_CONTROL) {
+          if (REDIRECTION_INPUT <
+                  stack->prev->currentTree->node->execControl.opType &&
+              stack->prev->currentTree->node->execControl.opType < PIPE) {
+
+            Tree *tree = stack->prev->currentTree;
+            outputfdRight = getFd(
+                tree->rightSon ? tree->rightSon->node
+                                     ? tree->rightSon->node->type == FILE_PATH
+                                           ? tree->rightSon->node->filePath
+                                           : NULL
+                                     : NULL
+                               : NULL,
+                stack->prev->currentTree->node->execControl.opType);
+            opRight = stack->prev->currentTree->node->execControl.opType;
+            unStack(&stack);
+          } else if (stack->prev->currentTree->node->execControl.opType ==
+                     PIPE) {
+            pipe(fds);
+            outputfdRight = fds[1];
+            pipedInputRight = fds[0];
+            piped = 1;
+            pipedLeft = 1;
+          }
         }
         break;
       case REDIRECTION_OUTPUT:
@@ -388,50 +269,40 @@ int processTree(Tree *tree) {
         break;
       case REDIRECTION_APPEND:
         outputfdRight = open(upperRight ? upperRight->filePath : NULL,
-                             O_WRONLY | O_CREAT, 0644);
+                             O_WRONLY | O_CREAT | O_APPEND, 0644);
         break;
-      case PIPE:
-        if (!stack || !stack->currentTree || !stack->currentTree->node ||
-            stack->currentTree->node->type != EXEC_CONTROL) {
+      case PIPE:{
 
-          break;
-        }
-        switch (stack->currentTree->node->execControl.opType) {
+        int fdsRight[2];
+        pipe(fdsRight);
 
-        case REDIRECTION_OUTPUT:
-          outputfdRight = open(upperRight ? upperRight->filePath : NULL,
-                               O_WRONLY | O_CREAT | O_TRUNC, 0644);
-          break;
-        case REDIRECTION_APPEND:
-          outputfdRight = open(upperRight ? upperRight->filePath : NULL,
-                               O_WRONLY | O_CREAT, 0644);
-          break;
-        default:
-          break;
+        outputfdRight = fdsRight[1];
+        if (pipedLeft) {
+
+          close(fdsRight[0]);
+
+          pipedLeft = 0;
+        } else {
+          pipedInputRight = fdsRight[0];
         }
+
+        piped = 1;
         break;
-      case REDIRECTION_ERROR_OUTPUT:
-        break;
-      case REDIRECTION_ALL_OUTPUT:
-        break;
-      case REDIRECTION_STDERR_TO_STDOUT:
-        break;
-      case REDIRECTION_STDOUT_TO_STDERR:
-        break;
+        }
+
       default:
         outputfdRight = STDOUT_FILENO;
         break;
       }
       if (rightNode->type == PROCESS) {
 
-        printf("inputfdRight: %d\n", inputfdRight);
         retValue = spawn(rightNode->command.argv, outputfdRight, inputfdRight,
                          shouldWaitRight, opRight);
 
         if (opRight == AND) {
-          leftCanStart = leftProcessStatus == 0 ? 1 : 0;
+          rightCanStart = leftCanStart = retValue == 0 ? 1 : 0;
         } else if (opRight == XOR) {
-          leftCanStart = leftProcessStatus != 0 ? 1 : 0;
+          rightCanStart = leftCanStart = retValue != 0 ? 1 : 0;
         }
         if (outputfdRight > 2)
           close(outputfdRight);
@@ -444,7 +315,6 @@ int processTree(Tree *tree) {
         }
       }
     }
-    pipeline = 0;
   }
 
   if (stack)
