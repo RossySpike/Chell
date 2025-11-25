@@ -3,26 +3,13 @@
 #include <string.h>
 
 char **parseInput(char *input) {
-  const char *delims[] = {" ", "\"", "'"};
   char **tokens = NULL;
-  int currentDelim = 0;
   char *localInput = input;
   char *token = NULL;
-  switch (localInput[0]) {
-  case ' ': // space
-    currentDelim = 0;
-    break;
-  case '"': // "
-    currentDelim = 1;
-    break;
-  case '\'': // '
-    currentDelim = 2;
-    break;
-  }
 
   int currentToken = 0;
   do {
-    token = strtok(currentToken ? NULL : localInput, delims[currentDelim]);
+    token = strtok(currentToken ? NULL : localInput, " ");
     if (!tokens) {
       tokens = malloc(sizeof(char *));
     } else {
