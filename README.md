@@ -7,7 +7,9 @@ Una Shell en C.
 ## Restricciones
 
 1. No trabaja con multinilea.
-2. No trabaja con redirecciones.
+2. No trabaja con redirecciones error.
+3. No trabaja con variables.
+4. No expande parametros.
 
 ---
 
@@ -15,9 +17,6 @@ Una Shell en C.
 
 1. logica de comandos simples.
 2. lanzar procesos en segundo plano.
+3. redirecciones (< ; > ; >>)
+4. Pipes ( | )
 
----
-
-## TODO
-
-1. Implementar redirecciones.
