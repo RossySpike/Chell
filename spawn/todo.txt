@@ -1,0 +1,2 @@
+hola
+ls: no se puede acceder a 'archivo_inexistente': No existe el fichero o el directorio

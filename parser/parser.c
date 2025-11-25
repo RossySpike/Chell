@@ -22,11 +22,12 @@ char **parseInput(char *input) {
 
   int currentToken = 0;
   do {
-    token = strtok(currentToken ? 0 : localInput, delims[currentDelim]);
+    token = strtok(currentToken ? NULL : localInput, delims[currentDelim]);
     if (!tokens) {
       tokens = malloc(sizeof(char *));
+    } else {
+      tokens = realloc(tokens, sizeof(char *) * (currentToken + 1));
     }
-    tokens = realloc(tokens, sizeof(char *) * (currentToken + 1));
     tokens[currentToken++] = token;
 
   } while (token != NULL);
